@@ -28,15 +28,22 @@ private enum API{
     static let key = ""
 }
 
-class OpenWeatherMapController: WebServiceController{
+final class OpenWeatherMapController: WebServiceController{
     // https://api.openweathermap.org/data/2.5/weather?q={city name}&appid={API key}
     // https://api.openweathermap.org/data/2.5/weather?q=London&appid={API key}
 //    lazy var APIKey: String? = {
 //        return APIKEY().getKey()
 //    }()
 //    lazy var endPoint = "https://api.openweathermap.org/data/2.5/weather?q=\(city)&appid=\(APIKey ?? "")"
+    let fallbackService: WebServiceController?
+    var weatherList: OpenWeatherMapData?
+    
+    init(fallbackService: WebServiceController? = nil){
+        self.fallbackService = fallbackService
+    }
+    
     func fetchWeatherDta(for city: String, completionHandler: @escaping (String?, WebServiceControllerError?) -> Void) {
-        let endPoint = "https://api.openweathermap.org/data/2.5/weather?q=\(city)&appid=\(API.key)"
+        let endPoint = "https://tpi.openweathermap.org/data/2.5/weather?q=\(city)&appid=\(API.key)"
         
         guard let safeURLString = endPoint.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed), let endPointURL = URL(string: safeURLString) else{
             completionHandler(nil, WebServiceControllerError.invalidURL(endPoint))
@@ -45,25 +52,34 @@ class OpenWeatherMapController: WebServiceController{
         
         let dataTask = URLSession.shared.dataTask(with: endPointURL){ (data, response, error) in
             guard error == nil else{
-                completionHandler(nil, WebServiceControllerError.forwarded(error!))
+                if let fallbackService = self.fallbackService {
+                    fallbackService.fetchWeatherDta(for: city, completionHandler: completionHandler)
+                }else{
+                    completionHandler(nil, WebServiceControllerError.forwarded(error!))
+                }
                 return
             }
             
             guard let responseData = data else{
-                completionHandler(nil, WebServiceControllerError.invalidPayload(endPointURL))
+                if let fallbackService = self.fallbackService {
+                    fallbackService.fetchWeatherDta(for: city, completionHandler: completionHandler)
+                }else{
+                    completionHandler(nil, WebServiceControllerError.invalidPayload(endPointURL))
+                }
                 return
             }
             
             let decoder = JSONDecoder()
             do{
-                let weatherList = try decoder.decode(OpenWeatherMapContainer.self, from: responseData)
-                guard let weatherInfo = weatherList.list?.first,
-                      let weather = weatherInfo.weather.first?.main,
-                      let temperature = weatherInfo.main.temp else{
+                print(responseData)
+                self.weatherList = try decoder.decode(OpenWeatherMapData.self, from: responseData)
+                guard let weatherInfo = self.weatherList?.weather.first,
+                      let temperature = self.weatherList?.main.temp else{
                           completionHandler(nil, WebServiceControllerError.invalidPayload(endPointURL))
                           return
                       }
-                let weatherDescription = "\(weather) \(temperature) F"
+                print("\(weatherInfo.main) \(temperature) F")
+                let weatherDescription = "\(weatherInfo.main) \(temperature) F"
                 completionHandler(weatherDescription, nil)
             }catch let error{
                 completionHandler(nil, WebServiceControllerError.forwarded(error))
